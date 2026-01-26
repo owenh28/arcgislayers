@@ -1,5 +1,13 @@
 # arcgislayers (development version)
 
+## New features
+
+## Bug Fixes
+
+- `arc_select()` returns an empty `data.frame` instead of `NULL` when no features are returned from a query
+
+## Breaking changes
+
 # arcgislayers 0.5.1
 
 ## New features
