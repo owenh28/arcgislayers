@@ -39,22 +39,20 @@
 #' }
 
 add_attachments <- function(
-x,
-feature_ids,
-file_paths,
-file_names,
-use_basename=TRUE,
-.progress = TRUE,
-token=arc_token()
-){
+  x,
+  feature_ids,
+  file_paths,
+  file_names,
+  use_basename = TRUE,
+  .progress = TRUE,
+  token = arc_token()
+) {
   obj_check_layer(x)
 
-  if (
-    !rlang::is_character(feature_ids) && !rlang::is_integer(feature_ids)
-  ) {
+  if (!rlang::is_character(feature_ids) && !rlang::is_integer(feature_ids)) {
     cli::cli_abort("{.arg feature_ids} must be a character or integer vector")
   }
-   if (anyNA(feature_id)) {
+  if (anyNA(feature_id)) {
     cli::cli_abort("{.arg feature_ids} must not contain missing values")
   }
   if (anyNA(file_paths)) {
@@ -68,7 +66,7 @@ token=arc_token()
       "{.arg feature_ids} and {.arg file_paths} must be the same length"
     )
   }
-  if (!use_basename && n_filenames != n_filepaths){
+  if (!use_basename && n_filenames != n_filepaths) {
     cli::cli_abort(
       "{.arg file_names} and {.arg file_paths} must be the same length when {.arg use_basename} is FALSE"
     )
@@ -76,36 +74,40 @@ token=arc_token()
 
   url <- x[["url"]]
 
-  if(use_basename){
-    reqs <- purr::pmap(list(feature_ids, file_paths), \(feat, path){
-      file <- curl::form_file(path, name=basename(path))
+  if (use_basename) {
+    reqs <- purrr::pmap(list(feature_ids, file_paths), \(feat, path) {
+      file <- curl::form_file(path, name = basename(path))
       arc_base_req(
         url,
-        path=c(feat, "addAttachment"),
-        token=token,
-        query = c(f="json")
-      ) |> httr2::req_body_multipart(
-        attachment=file,
-      )
+        path = c(feat, "addAttachment"),
+        token = token,
+        query = c(f = "json")
+      ) |>
+        httr2::req_body_multipart(
+          attachment = file,
+        )
     })
-  }else{
-    reqs <- purr::pmap(list(feature_ids, file_paths, file_names), \(feat, path, name){
-      file <- curl::form_file(path, name=name)
-      arc_base_req(
-        url,
-        path=c(feat, "addAttachment"),
-        token=token,
-        query = c(f="json")
-      ) |> httr2::req_body_multipart(
-        attachment=file,
-      )
-    })
+  } else {
+    reqs <- purrr::pmap(
+      list(feature_ids, file_paths, file_names),
+      \(feat, path, name) {
+        file <- curl::form_file(path, name = name)
+        arc_base_req(
+          url,
+          path = c(feat, "addAttachment"),
+          token = token,
+          query = c(f = "json")
+        ) |>
+          httr2::req_body_multipart(
+            attachment = file,
+          )
+      }
+    )
   }
-
 
   resps <- httr2::req_perform_parallel(
     reqs,
-    max_active=3,
+    max_active = 3,
     progress = .progress,
     on_error = "continue"
   )
@@ -117,7 +119,6 @@ token=arc_token()
 
       if (rlang::is_condition(cnd)) {
         cnd$call <- rlang::caller_call(2)
-        print(cnd)
         return(NULL)
       }
       as.data.frame(compact(RcppSimdJson::fparse(r)[[1]]))
