@@ -1,18 +1,8 @@
-#' Add Feature Service Attachments
-#'
-#' Add attachments to features in feature layers.
-#'
-#' @details
-#'
-#' If any requests fail, the requests are added as as the `errors` attribute to the resultant `data.frame`.
-#' @param path a vecetor of the same length as `feature_id` indicating where the attachment exists.
+#' @param file_name the name of the file. Defaults to the `basename(path)`.
+#' Must be the same length as `feature_id`.
 #' @inheritParams arc_open
-#' @param feature_ids a vector of object IDs that corresponds to the features that will receive attachments.
-#' @param file_paths a vector of file paths that point to the files to upload as attachments.
-#' @param file_names a vector of names that the attachments will use if use_basename is FALSE.
-#' @param use_basename a logical determining whether the base file name in the file path will be used as the attachment name.
-#' @returns a `data.frame` with 2 columns returning the status of the update.
 #' @references See [API documentation](https://developers.arcgis.com/rest/services-reference/enterprise/add-attachment/#request-parameters) for more.
+#' @rdname attachments
 #' @export
 #' @examples
 #' \dontrun{
@@ -40,85 +30,87 @@
 
 add_attachments <- function(
   x,
-  feature_ids,
-  file_paths,
-  file_names,
-  use_basename = TRUE,
+  feature_id,
+  path,
+  file_name = basename(path),
   .progress = TRUE,
   token = arc_token()
 ) {
   obj_check_layer(x)
 
-  if (!rlang::is_character(feature_ids) && !rlang::is_integer(feature_ids)) {
-    cli::cli_abort("{.arg feature_ids} must be a character or integer vector")
+  if (!rlang::is_character(feature_id) && !rlang::is_integer(feature_id)) {
+    cli::cli_abort("{.arg feature_id} must be a character or integer vector")
   }
+
   if (anyNA(feature_id)) {
-    cli::cli_abort("{.arg feature_ids} must not contain missing values")
+    cli::cli_abort("{.arg feature_id} must not contain missing values")
   }
-  if (anyNA(file_paths)) {
-    cli::cli_abort("{.arg file_paths} must not contain missing values")
+
+  if (!rlang::is_character(path)) {
+    cli::cli_abort("{.arg path} must be a character vector")
   }
-  n_filepaths <- length(file_paths)
-  n_features <- length(feature_ids)
-  n_filenames <- file_names
-  if (n_features != n_filepaths) {
+
+  if (anyNA(path)) {
+    cli::cli_abort("{.arg path} must not contain missing values")
+  }
+
+  if (!all(file.exists(path))) {
+    cli::cli_abort("All files specified in {.arg path} must exist")
+  }
+
+  n <- length(path)
+
+  if (n != length(feature_id)) {
     cli::cli_abort(
-      "{.arg feature_ids} and {.arg file_paths} must be the same length"
+      "{.arg feature_id} and {.arg path} must be the same length"
     )
   }
-  if (!use_basename && n_filenames != n_filepaths) {
+
+  if (n != length(file_name)) {
     cli::cli_abort(
-      "{.arg file_names} and {.arg file_paths} must be the same length when {.arg use_basename} is FALSE"
+      "{.arg file_name} and {.arg path} must be the same length"
     )
   }
 
   url <- x[["url"]]
 
-  if (use_basename) {
-    reqs <- purrr::pmap(list(feature_ids, file_paths), \(feat, path) {
-      file <- curl::form_file(path, name = basename(path))
-      arc_base_req(
-        url,
-        path = c(feat, "addAttachment"),
-        token = token,
-        query = c(f = "json")
-      ) |>
-        httr2::req_body_multipart(
-          attachment = file,
-        )
-    })
-  } else {
-    reqs <- purrr::pmap(
-      list(feature_ids, file_paths, file_names),
-      \(feat, path, name) {
-        file <- curl::form_file(path, name = name)
-        arc_base_req(
-          url,
-          path = c(feat, "addAttachment"),
-          token = token,
-          query = c(f = "json")
-        ) |>
-          httr2::req_body_multipart(
-            attachment = file,
-          )
-      }
-    )
+  if (is.null(url)) {
+    cli::cli_abort("Feature Service URL was null. This is unexpected.")
   }
 
-  resps <- httr2::req_perform_parallel(
-    reqs,
+  all_reqs <- vector("list", n)
+
+  for (i in seq_len(n)) {
+    fid <- feature_id[i]
+    p <- path[i]
+    fname <- file_name[i]
+    f <- curl::form_file(p, name = fname)
+
+    all_reqs[[i]] <- arc_base_req(
+      url,
+      path = c(fid, "addAttachment"),
+      token = token,
+      query = c(f = "json")
+    ) |>
+      httr2::req_body_multipart(attachment = f)
+  }
+
+  all_resps <- httr2::req_perform_parallel(
+    all_reqs,
     max_active = 3,
     progress = .progress,
     on_error = "continue"
   )
+
   all_resps_body <- lapply(
-    httr2::resps_successes(resps),
+    httr2::resps_successes(all_resps),
     function(.x) {
       r <- httr2::resp_body_string(.x)
       cnd <- catch_error(r)
 
       if (rlang::is_condition(cnd)) {
         cnd$call <- rlang::caller_call(2)
+        print(cnd)
         return(NULL)
       }
       as.data.frame(compact(RcppSimdJson::fparse(r)[[1]]))
@@ -127,7 +119,7 @@ add_attachments <- function(
 
   res <- rbind_results(all_resps_body)
 
-  errors <- httr2::resps_failures(resps)
+  errors <- httr2::resps_failures(all_resps)
   n_errs <- length(errors)
   if (n_errs > 0) {
     cli::cli_warn(
